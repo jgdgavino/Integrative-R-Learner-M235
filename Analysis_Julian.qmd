@@ -13,6 +13,12 @@ format:
 ---
 
 ```{r}
-nsw_experimental <- 
+nsw_experimental <- read.csv('data/nsw_experimental.csv')
+```
+
+
+
+```{r}
+nsw_observational <- read.csv('data/nsw_observational.csv')
 ```
 
