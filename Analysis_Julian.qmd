@@ -22,3 +22,7 @@ nsw_experimental <- read.csv('data/nsw_experimental.csv')
 nsw_observational <- read.csv('data/nsw_observational.csv')
 ```
 
+
+```{r}
+nsw_observational_trimmed <- read.csv('data/nsw_observational_resampling_trimmed.csv')
+```

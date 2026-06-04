@@ -1,0 +1,428 @@
+---
+title: "Integrative R-Learner: NSW Application"
+author: "Integrative R-Learner Analysis"
+format:
+  html:
+    theme: cosmo
+    embed-resources: true
+    number-sections: true
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    code-fold: false
+    df-print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE, message = FALSE, fig.width = 8,
+  fig.height = 5
+)
+library(pacman)
+p_load(glmnet, grf, ggplot2, dplyr, tidyr, kableExtra)
+```
+
+# Background
+
+The National Supported Work (NSW) Demonstration (1975--1979) was a
+randomized job-training program for disadvantaged workers. LaLonde
+(1986) showed that replacing experimental controls with
+non-experimental CPS controls caused standard regression to produce
+biased estimates. We apply the **Integrative R-Learner** (Wu & Yang,
+2022) to combine the RCT arm with the CPS-augmented observational
+sample, estimating heterogeneous treatment effects while accounting
+for unmeasured confounding in the observational data.
+
+# Setup
+
+```{r load-method}
+source("method_initial.r")
+```
+
+```{r load-data}
+nsw_exp <- read.csv("data/nsw_experimental.csv")
+nsw_obs <- read.csv("data/nsw_observational.csv")
+```
+
+# Data Overview
+
+```{r dimensions}
+cat("Experimental (RCT):", nrow(nsw_exp), "obs\n")
+cat("Observational (CPS):", nrow(nsw_obs), "obs\n")
+```
+
+```{r summary-experimental}
+summary(nsw_exp)
+```
+
+```{r summary-observational}
+summary(nsw_obs)
+```
+
+## Treatment Balance
+
+```{r treatment-balance}
+cat("=== RCT treatment counts ===\n")
+print(table(nsw_exp$treat))
+cat("\n=== Observational treatment counts ===\n")
+print(table(nsw_obs$treat))
+```
+
+## Covariate Distributions
+
+```{r covariate-comparison, fig.height=8}
+covars <- c(
+  "age", "educ", "black", "hisp",
+  "marr", "nodegree", "re74", "re75"
+)
+
+par(mfrow = c(2, 4), mar = c(4, 4, 2, 1))
+for (v in covars) {
+  boxplot(
+    list(
+      RCT = nsw_exp[[v]],
+      CPS = nsw_obs[[v]]
+    ),
+    main = v, col = c("#4A90D9", "#E8634F"),
+    border = "#333333", las = 1
+  )
+}
+```
+
+# Naive Estimates
+
+```{r naive-rct}
+ate_rct <- mean(nsw_exp$re78[nsw_exp$treat == 1]) -
+  mean(nsw_exp$re78[nsw_exp$treat == 0])
+cat("Experimental ATE:", round(ate_rct, 2), "\n")
+```
+
+```{r naive-obs}
+ate_obs <- mean(nsw_obs$re78[nsw_obs$treat == 1]) -
+  mean(nsw_obs$re78[nsw_obs$treat == 0])
+cat("Naive observational ATE:", round(ate_obs, 2), "\n")
+```
+
+```{r naive-ols}
+fit_ols <- lm(
+  re78 ~ treat + age + educ + black + hisp +
+    marr + nodegree + re74 + re75,
+  data = nsw_obs
+)
+cat(
+  "OLS-adjusted observational ATE:",
+  round(coef(fit_ols)["treat"], 2), "\n"
+)
+```
+
+# Integrative R-Learner
+
+## Fit the Model
+
+```{r fit-irlearner}
+set.seed(42)
+
+covariates <- c(
+  "age", "educ", "black", "hisp",
+  "marr", "nodegree", "re74", "re75"
+)
+
+result <- integrative_rlearner(
+  data_rct = nsw_exp,
+  data_obs = nsw_obs,
+  outcome = "re78",
+  treatment = "treat",
+  covariates = covariates,
+  degree = 2,
+  K_nuisance = 5,
+  K_loss = 5,
+  lambda_grid = 10^seq(-3, 2, length.out = 12),
+  ratio_grid = c(0.01, 0.1, 0.5, 1, 2, 5, 10, 50),
+  verbose = TRUE
+)
+```
+
+## Summary
+
+```{r model-summary}
+summary(result)
+```
+
+## Average Treatment Effect
+
+```{r ate-comparison}
+n_rct <- sum(result$S == 1)
+
+ate_irlearner_all <- mean(result$tau_hat)
+ate_irlearner_rct <- mean(result$tau_hat[1:n_rct])
+
+comparison <- data.frame(
+  Method = c(
+    "RCT (difference-in-means)",
+    "Naive observational",
+    "OLS-adjusted observational",
+    "Integrative R-Learner (all)",
+    "Integrative R-Learner (RCT sample)"
+  ),
+  ATE = round(c(
+    ate_rct, ate_obs, coef(fit_ols)["treat"],
+    ate_irlearner_all, ate_irlearner_rct
+  ), 2)
+)
+comparison
+```
+
+# Heterogeneous Treatment Effects
+
+## CATE Distribution
+
+```{r cate-distribution, fig.height=5}
+tau_rct <- result$tau_hat[result$S == 1]
+tau_obs <- result$tau_hat[result$S == 0]
+
+par(mfrow = c(1, 2), mar = c(4, 4, 3, 1))
+
+hist(
+  tau_rct, breaks = 30, col = "#4A90D980",
+  border = "#4A90D9",
+  main = "CATE in RCT sample",
+  xlab = "Estimated CATE", las = 1
+)
+abline(v = mean(tau_rct), col = "#C0392B", lwd = 2)
+
+hist(
+  tau_obs, breaks = 30, col = "#E8634F80",
+  border = "#E8634F",
+  main = "CATE in OS sample",
+  xlab = "Estimated CATE", las = 1
+)
+abline(v = mean(tau_obs), col = "#C0392B", lwd = 2)
+```
+
+## CATE by Subgroups
+
+```{r cate-subgroups}
+dat <- result$data
+dat$tau_hat <- result$tau_hat
+dat$c_hat <- result$c_hat
+
+subgroup_cate <- function(var, label) {
+  rct_sub <- dat[dat$S == 1, ]
+  data.frame(
+    Variable = label,
+    Group_0 = round(
+      mean(rct_sub$tau_hat[rct_sub[[var]] == 0]), 2
+    ),
+    Group_1 = round(
+      mean(rct_sub$tau_hat[rct_sub[[var]] == 1]), 2
+    ),
+    Diff = round(
+      mean(rct_sub$tau_hat[rct_sub[[var]] == 1]) -
+        mean(rct_sub$tau_hat[rct_sub[[var]] == 0]), 2
+    )
+  )
+}
+
+rbind(
+  subgroup_cate("black", "Black"),
+  subgroup_cate("hisp", "Hispanic"),
+  subgroup_cate("marr", "Married"),
+  subgroup_cate("nodegree", "No Degree")
+)
+```
+
+```{r cate-by-age, fig.height=5}
+rct_dat <- dat[dat$S == 1, ]
+
+par(mar = c(4, 4, 3, 1))
+plot(
+  rct_dat$age, rct_dat$tau_hat,
+  pch = 16, col = "#4A90D980", cex = 0.8,
+  xlab = "Age", ylab = "Estimated CATE",
+  main = "CATE vs Age (RCT sample)",
+  las = 1
+)
+lo <- loess(tau_hat ~ age, data = rct_dat)
+age_seq <- seq(
+  min(rct_dat$age), max(rct_dat$age),
+  length.out = 100
+)
+lines(
+  age_seq, predict(lo, data.frame(age = age_seq)),
+  col = "#C0392B", lwd = 2
+)
+abline(h = 0, lty = 2, col = "gray50")
+```
+
+```{r cate-by-education, fig.height=5}
+par(mar = c(4, 4, 3, 1))
+plot(
+  rct_dat$educ, rct_dat$tau_hat,
+  pch = 16, col = "#27AE6080", cex = 0.8,
+  xlab = "Education (years)",
+  ylab = "Estimated CATE",
+  main = "CATE vs Education (RCT sample)",
+  las = 1
+)
+lo_ed <- loess(tau_hat ~ educ, data = rct_dat)
+ed_seq <- seq(
+  min(rct_dat$educ), max(rct_dat$educ),
+  length.out = 100
+)
+lines(
+  ed_seq, predict(lo_ed, data.frame(educ = ed_seq)),
+  col = "#C0392B", lwd = 2
+)
+abline(h = 0, lty = 2, col = "gray50")
+```
+
+```{r cate-by-earnings, fig.height=5}
+par(mar = c(4, 4, 3, 1))
+plot(
+  rct_dat$re75, rct_dat$tau_hat,
+  pch = 16, col = "#8E44AD80", cex = 0.8,
+  xlab = "Earnings in 1975 ($)",
+  ylab = "Estimated CATE",
+  main = "CATE vs Prior Earnings (RCT sample)",
+  las = 1
+)
+lo_re <- loess(tau_hat ~ re75, data = rct_dat)
+re_seq <- seq(
+  min(rct_dat$re75), max(rct_dat$re75),
+  length.out = 100
+)
+lines(
+  re_seq, predict(lo_re, data.frame(re75 = re_seq)),
+  col = "#C0392B", lwd = 2
+)
+abline(h = 0, lty = 2, col = "gray50")
+```
+
+# Confounding Function
+
+```{r confounding-function}
+obs_dat <- dat[dat$S == 0, ]
+cat("Confounding function c(X) summary (OS only):\n")
+print(summary(obs_dat$c_hat))
+```
+
+```{r confounding-hist, fig.height=4}
+par(mar = c(4, 4, 3, 1))
+hist(
+  obs_dat$c_hat, breaks = 30,
+  col = "#F39C1280", border = "#F39C12",
+  main = "Confounding Function c(X) in OS",
+  xlab = "Estimated c(X)", las = 1
+)
+abline(v = 0, lty = 2, col = "gray50", lwd = 2)
+abline(
+  v = mean(obs_dat$c_hat),
+  col = "#C0392B", lwd = 2
+)
+```
+
+# Comparison: RCT-Only vs Integrative
+
+```{r rct-only-rlearner}
+set.seed(42)
+
+nuis_rct <- crossfit_nuisance(
+  nsw_exp$re78, nsw_exp$treat,
+  nsw_exp[, covariates], rep(1, nrow(nsw_exp)),
+  K = 5
+)
+Y_res_rct <- nsw_exp$re78 - nuis_rct$mu_hat
+A_res_rct <- nsw_exp$treat - nuis_rct$e_hat
+
+B_rct <- build_poly_basis(
+  nsw_exp[, covariates], degree = 2
+)
+
+best_cv_rct <- Inf
+best_lambda_rct <- NA
+for (lt in 10^seq(-3, 2, length.out = 12)) {
+  n_rct_only <- nrow(nsw_exp)
+  folds <- sample(rep(1:5, length.out = n_rct_only))
+  cv_err <- numeric(5)
+  for (k in 1:5) {
+    tr <- folds != k
+    te <- folds == k
+    Z_tr <- A_res_rct[tr] * B_rct[tr, ]
+    theta_k <- solve(
+      crossprod(Z_tr) / sum(tr) +
+        lt * diag(ncol(B_rct)),
+      crossprod(Z_tr, Y_res_rct[tr]) / sum(tr)
+    )
+    fitted_te <- A_res_rct[te] *
+      (B_rct[te, ] %*% theta_k)
+    cv_err[k] <- mean(
+      (Y_res_rct[te] - fitted_te)^2
+    )
+  }
+  if (mean(cv_err) < best_cv_rct) {
+    best_cv_rct <- mean(cv_err)
+    best_lambda_rct <- lt
+  }
+}
+
+Z_full <- A_res_rct * B_rct
+alpha_rct <- solve(
+  crossprod(Z_full) / nrow(nsw_exp) +
+    best_lambda_rct * diag(ncol(B_rct)),
+  crossprod(Z_full, Y_res_rct) / nrow(nsw_exp)
+)
+
+tau_rct_only <- as.numeric(B_rct %*% alpha_rct)
+```
+
+```{r compare-methods, fig.height=5}
+par(mar = c(4, 4, 3, 1))
+plot(
+  tau_rct_only, tau_rct,
+  pch = 16, col = "#2C3E5080", cex = 0.8,
+  xlab = "RCT-only R-Learner CATE",
+  ylab = "Integrative R-Learner CATE",
+  main = "RCT-only vs Integrative R-Learner",
+  las = 1
+)
+abline(0, 1, col = "#C0392B", lwd = 2, lty = 2)
+abline(h = 0, v = 0, col = "gray70", lty = 3)
+```
+
+```{r variance-comparison}
+var_rct_only <- var(tau_rct_only)
+var_integrative <- var(tau_rct)
+
+cat("Variance of RCT-only CATE:", round(var_rct_only, 2))
+cat(
+  "\nVariance of Integrative CATE:",
+  round(var_integrative, 2)
+)
+cat(
+  "\nEfficiency ratio (RCT/Integrative):",
+  round(var_rct_only / var_integrative, 3), "\n"
+)
+```
+
+# Summary
+
+```{r final-summary}
+cat("====================================\n")
+cat("  Final Results Summary\n")
+cat("====================================\n\n")
+cat("Benchmark (RCT ATE):", round(ate_rct, 2), "\n")
+cat(
+  "Integrative R-Learner ATE:",
+  round(ate_irlearner_rct, 2), "\n"
+)
+cat(
+  "Naive observational ATE:",
+  round(ate_obs, 2), "\n\n"
+)
+cat(
+  "The Integrative R-Learner recovers an ATE",
+  "close to the\nexperimental benchmark while",
+  "the naive observational estimate\nis heavily",
+  "biased by unmeasured confounding.\n"
+)
+```

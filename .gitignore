@@ -2,7 +2,5 @@
 .Rhistory
 .RData
 .Ruserdata
+.positai
 
-# Data files
-data/*
-!data/.gitkeeptouch data/.gitkeep
