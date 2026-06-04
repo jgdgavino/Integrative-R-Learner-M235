@@ -3,3 +3,6 @@
 .RData
 .Ruserdata
 .positai
+# Data files
+data/*
+!data/.gitkeep
