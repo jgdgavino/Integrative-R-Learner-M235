@@ -1,0 +1,13 @@
+---
+title: "Integrative R Learner on NSW Data"
+format:
+  html:
+    theme: cosmo
+    embed-resources: true
+    number-sections: true
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    code-fold: false
+    df-print: kable
+---
