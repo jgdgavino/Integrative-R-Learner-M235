@@ -27,12 +27,12 @@ use_k_fold <- TRUE
 
 # Load Data
 ```{r}
-nsw_experimental <- read.csv('data/nsw_experimental.csv')
+nsw_experimental <- read.csv('data/nsw_experimental2.csv')
 ```
 
 ```{r}
-nsw_observational <- read.csv('data/nsw_observational_resampling_trimmed_new.csv')
-# nsw_observational <- read.csv('data/nsw_observational2.csv')
+# nsw_observational <- read.csv('data/nsw_observational_resampling_trimmed_new.csv')
+nsw_observational <- read.csv('data/nsw_observational2.csv')
 ```
 
 ```{r}
@@ -245,7 +245,7 @@ c_hat <- mu_obs_pred - mu_rct_pred
 
 # Fit Tau using Weighted Forests
 
-This is taken directly from 
+This is taken directly from the appendix algorithm 2
 
 ```{r}
 eps_Y <- Y - mu_hat
