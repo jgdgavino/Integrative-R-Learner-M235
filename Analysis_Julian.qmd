@@ -27,12 +27,12 @@ use_k_fold <- TRUE
 
 # Load Data
 ```{r}
-nsw_experimental <- read.csv('data/nsw_experimental2.csv')
+nsw_experimental <- read.csv('data/nsw_experimental.csv')
 ```
 
 ```{r}
-# nsw_observational <- read.csv('data/nsw_observational_resampling_trimmed_new.csv')
-nsw_observational <- read.csv('data/nsw_observational2.csv')
+nsw_observational <- read.csv('data/nsw_observational_resampling_trimmed_new.csv')
+# nsw_observational <- read.csv('data/nsw_observational2.csv')
 ```
 
 ```{r}
@@ -236,6 +236,15 @@ if (use_k_fold == TRUE){
 This could be any value, but to have a smart initialization, we use the difference in outcomes between observed and RCT
 
 ```{r}
+
+# RCT outcome model
+mu_rct_model <- lm(re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
+                   data = nsw_experimental)
+
+# Observational outcome model
+mu_obs_model <- lm(re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
+                   data = nsw_observational)
+
 mu_rct_pred <- predict(mu_rct_model, newdata = X)
 mu_obs_pred <- predict(mu_obs_model, newdata = X)
 
