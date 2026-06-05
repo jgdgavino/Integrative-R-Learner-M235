@@ -13,16 +13,178 @@ format:
 ---
 
 ```{r}
+set.seed(123)
+library(grf)
+library(ggplot2)
+```
+
+
+# Load Data
+```{r}
 nsw_experimental <- read.csv('data/nsw_experimental.csv')
 ```
 
-
+```{r}
+nsw_observational <- read.csv('data/nsw_observational_resampling_trimmed_new.csv')
+# nsw_observational <- read.csv('data/nsw_observational.csv')
+```
 
 ```{r}
-nsw_observational <- read.csv('data/nsw_observational.csv')
+str(nsw_observational)
 ```
 
 
 ```{r}
-nsw_observational_trimmed <- read.csv('data/nsw_observational_resampling_trimmed.csv')
+str(nsw_experimental)
 ```
+
+# Combine Data
+
+Row bind the data and create an indicator variable (1 = experimental, 0 = observational)
+```{r}
+nsw_experimental$S <- 1
+nsw_observational$S <- 0
+
+data_all <- rbind(nsw_experimental, nsw_observational)
+```
+
+
+# Define Outcome, Covariates, Assignment, and Origin
+
+```{r}
+Y <- data_all$re78
+A <- data_all$treat
+
+X <- data_all[, c("age","educ","black","hisp","marr","nodegree","re74","re75")]
+S <- data_all$S
+```
+
+
+# Calculate Propensity Score
+
+```{r}
+prop_model <- glm(
+  S ~ .,
+  data = data_all[, c("S", "age","educ","black","hisp","marr","nodegree","re74","re75")],
+  family = binomial()
+)
+
+e_hat <- predict(
+  prop_model,
+  newdata = data_all[, c("age","educ","black","hisp","marr","nodegree","re74","re75")],
+  type = "response"
+)
+```
+
+
+
+
+
+## Check Overlap
+
+```{r}
+df <- data.frame(
+  ps = e_hat,
+  treat = data_all$treat
+)
+
+ggplot(df, aes(x = ps, fill = factor(treat))) +
+  geom_density(alpha = 0.4) +
+  labs(fill = "Treatment", x = "Propensity score", y = "Density")
+```
+
+Wow, look at that overlap. Even with the truth mixed in, we still have this mass on the left for control units
+
+
+
+
+# Calculate Outcome Model
+
+```{r}
+# RCT outcome model
+mu_rct_model <- lm(re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
+                   data = nsw_experimental)
+
+# Observational outcome model
+mu_obs_model <- lm(re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
+                   data = nsw_observational)
+
+X_rct <- X[S == 1, ]
+X_obs <- X[S == 0, ]
+
+mu_hat <- numeric(nrow(X))
+
+mu_hat[S == 1] <- predict(mu_rct_model, newdata = X_rct)
+mu_hat[S == 0] <- predict(mu_obs_model, newdata = X_obs)
+```
+
+
+
+
+
+# Initial Confounding Function
+
+This could be any value, but to have a smart initialization, we use the difference in outcomes between observed and RCT
+
+```{r}
+mu_rct_pred <- predict(mu_rct_model, newdata = X)
+mu_obs_pred <- predict(mu_obs_model, newdata = X)
+
+c_hat <- mu_obs_pred - mu_rct_pred
+```
+
+
+# Fit Tau using Causal Forest
+
+```{r}
+eps_Y <- Y - mu_hat
+eps_A <- A - e_hat
+weights <- eps_A^2
+```
+
+
+```{r}
+for (b in 1:4) {
+
+  Y_tilde <- (eps_Y / eps_A) - (1 - S) * c_hat
+
+  tau_forest <- regression_forest(
+    X,
+    Y_tilde,
+    sample.weights = weights
+  )
+
+  tau_hat <- predict(tau_forest, X)$predictions
+
+
+  Y_tilde <- (eps_Y / eps_A) - tau_hat
+
+  obs_idx <- which(S == 0)
+
+  c_forest <- regression_forest(
+    X[obs_idx,],
+    Y_tilde[obs_idx],
+    sample.weights = weights[obs_idx]
+  )
+
+  c_hat <- predict(c_forest, X)$predictions
+}
+```
+
+
+```{r}
+tau_hat <- predict(tau_forest, X)$predictions
+```
+
+
+Get ATE
+```{r}
+ate <- mean(tau_hat)  # or all X, but no weights
+ate
+```
+
+```{r}
+ate_se <- sd(tau_hat) / sqrt(length(tau_hat))
+ate_se
+```
+
