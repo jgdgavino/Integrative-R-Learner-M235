@@ -96,30 +96,30 @@ if (use_k_fold == TRUE){
   
   e_hat <- rep(NA, n)
 
-features <- c("age","educ","black","hisp","marr","nodegree","re74","re75")
-
-for (k in 1:K) {
-
-  train_idx <- which(fold_id != k)
-  test_idx  <- which(fold_id == k)
-
-  train_data <- data_all[train_idx, c("S", features)]
-  test_data  <- data_all[test_idx, features]
-
-  # fit model on training fold
-  prop_model_k <- glm(
-    S ~ .,
-    data = train_data,
-    family = binomial()
-  )
-
-  # predict on held-out fold
-  e_hat[test_idx] <- predict(
-    prop_model_k,
-    newdata = test_data,
-    type = "response"
-  )
-}
+  features <- c("age","educ","black","hisp","marr","nodegree","re74","re75")
+  
+  for (k in 1:K) {
+  
+    train_idx <- which(fold_id != k)
+    test_idx  <- which(fold_id == k)
+  
+    train_data <- data_all[train_idx, c("S", features)]
+    test_data  <- data_all[test_idx, features]
+  
+    # fit model on training fold
+    prop_model_k <- glm(
+      S ~ .,
+      data = train_data,
+      family = binomial()
+    )
+  
+    # predict on held-out fold
+    e_hat[test_idx] <- predict(
+      prop_model_k,
+      newdata = test_data,
+      type = "response"
+    )
+  }
 }
 ```
 
