@@ -134,7 +134,9 @@ c_hat <- mu_obs_pred - mu_rct_pred
 ```
 
 
-# Fit Tau using Causal Forest
+# Fit Tau using Weighted Forests
+
+This is taken directly from 
 
 ```{r}
 eps_Y <- Y - mu_hat
@@ -188,3 +190,4 @@ ate_se <- sd(tau_hat) / sqrt(length(tau_hat))
 ate_se
 ```
 
+git add 
