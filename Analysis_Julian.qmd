@@ -16,6 +16,12 @@ format:
 set.seed(123)
 library(grf)
 library(ggplot2)
+library(caret)
+```
+
+k-fold indicator
+```{r}
+use_k_fold <- TRUE
 ```
 
 
@@ -26,7 +32,7 @@ nsw_experimental <- read.csv('data/nsw_experimental.csv')
 
 ```{r}
 nsw_observational <- read.csv('data/nsw_observational_resampling_trimmed_new.csv')
-# nsw_observational <- read.csv('data/nsw_observational.csv')
+# nsw_observational <- read.csv('data/nsw_observational2.csv')
 ```
 
 ```{r}
@@ -62,22 +68,60 @@ S <- data_all$S
 
 # Calculate Propensity Score
 
-```{r}
-prop_model <- glm(
-  S ~ .,
-  data = data_all[, c("S", "age","educ","black","hisp","marr","nodegree","re74","re75")],
-  family = binomial()
-)
 
-e_hat <- predict(
-  prop_model,
-  newdata = data_all[, c("age","educ","black","hisp","marr","nodegree","re74","re75")],
-  type = "response"
-)
+
+```{r}
+if (use_k_fold == FALSE){
+  prop_model <- glm(
+    S ~ .,
+    data = data_all[, c("S", "age","educ","black","hisp","marr","nodegree","re74","re75")],
+    family = binomial()
+  )
+  
+  e_hat <- predict(
+    prop_model,
+    newdata = data_all[, c("age","educ","black","hisp","marr","nodegree","re74","re75")],
+    type = "response"
+  )
+}
 ```
 
 
+```{r}
+if (use_k_fold == TRUE){
+  n <- nrow(data_all)
+  K <- 5
+  
+  fold_id <- sample(rep(1:K, length.out = n))
+  
+  e_hat <- rep(NA, n)
 
+features <- c("age","educ","black","hisp","marr","nodegree","re74","re75")
+
+for (k in 1:K) {
+
+  train_idx <- which(fold_id != k)
+  test_idx  <- which(fold_id == k)
+
+  train_data <- data_all[train_idx, c("S", features)]
+  test_data  <- data_all[test_idx, features]
+
+  # fit model on training fold
+  prop_model_k <- glm(
+    S ~ .,
+    data = train_data,
+    family = binomial()
+  )
+
+  # predict on held-out fold
+  e_hat[test_idx] <- predict(
+    prop_model_k,
+    newdata = test_data,
+    type = "response"
+  )
+}
+}
+```
 
 
 ## Check Overlap
@@ -100,24 +144,89 @@ Wow, look at that overlap. Even with the truth mixed in, we still have this mass
 
 # Calculate Outcome Model
 
+
 ```{r}
-# RCT outcome model
-mu_rct_model <- lm(re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
-                   data = nsw_experimental)
 
-# Observational outcome model
-mu_obs_model <- lm(re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
-                   data = nsw_observational)
 
-X_rct <- X[S == 1, ]
-X_obs <- X[S == 0, ]
+if (use_k_fold == FALSE) {
+  # RCT outcome model
+  mu_rct_model <- lm(re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
+                     data = nsw_experimental)
+  
+  # Observational outcome model
+  mu_obs_model <- lm(re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
+                     data = nsw_observational)
+  
+  X_rct <- X[S == 1, ]
+  X_obs <- X[S == 0, ]
+  
+  mu_hat <- numeric(nrow(X))
+  
+  mu_hat[S == 1] <- predict(mu_rct_model, newdata = X_rct)
+  mu_hat[S == 0] <- predict(mu_obs_model, newdata = X_obs)
+}
 
-mu_hat <- numeric(nrow(X))
-
-mu_hat[S == 1] <- predict(mu_rct_model, newdata = X_rct)
-mu_hat[S == 0] <- predict(mu_obs_model, newdata = X_obs)
 ```
 
+```{r}
+if (use_k_fold == TRUE){
+  K <- 5
+  
+  mu_hat <- numeric(nrow(X))
+  
+  # -------------------------
+  # RCT folds
+  # -------------------------
+  rct_idx <- which(S == 1)
+  
+  folds_rct <- createFolds(rct_idx, k = K, list = TRUE)
+  
+  for (k in 1:K) {
+  
+    test_idx <- rct_idx[folds_rct[[k]]]
+    train_idx <- setdiff(rct_idx, test_idx)
+  
+    fit <- lm(
+      re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
+      data = data.frame(
+        re78 = Y[train_idx],
+        X[train_idx, ]
+      )
+    )
+  
+    mu_hat[test_idx] <- predict(
+      fit,
+      newdata = X[test_idx, ]
+    )
+  }
+  
+  # -------------------------
+  # Observational folds
+  # -------------------------
+  obs_idx <- which(S == 0)
+  
+  folds_obs <- createFolds(obs_idx, k = K, list = TRUE)
+  
+  for (k in 1:K) {
+  
+    test_idx <- obs_idx[folds_obs[[k]]]
+    train_idx <- setdiff(obs_idx, test_idx)
+  
+    fit <- lm(
+      re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
+      data = data.frame(
+        re78 = Y[train_idx],
+        X[train_idx, ]
+      )
+    )
+  
+    mu_hat[test_idx] <- predict(
+      fit,
+      newdata = X[test_idx, ]
+    )
+  }
+}
+```
 
 
 
@@ -146,7 +255,7 @@ weights <- eps_A^2
 
 
 ```{r}
-for (b in 1:4) {
+for (b in 1:7) {
 
   Y_tilde <- (eps_Y / eps_A) - (1 - S) * c_hat
 
@@ -190,4 +299,3 @@ ate_se <- sd(tau_hat) / sqrt(length(tau_hat))
 ate_se
 ```
 
-git add 
