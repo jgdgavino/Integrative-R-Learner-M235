@@ -1,0 +1,170 @@
+---
+title: "Biostat_M235_Final_Project"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+set.seed(123)
+library(grf)
+library(ggplot2)
+library(caret)
+```
+
+You can add options to executable code like this
+
+```{r}
+# read in the data
+observational_df <- read.csv("/nsw_observational_resampling_trimmed_new.csv")
+experimental_df <- read.csv("/nsw_experimental.csv")
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
+
+```{r}
+# rowbind the data
+experimental_df$S <- 1
+observational_df$S <- 0
+
+data_all <- rbind(experimental_df, observational_df)
+```
+
+```{r}
+features <- c("age","educ","black","hisp","marr","nodegree","re74","re75")
+
+Y <- data_all$re78
+A <- data_all$treat
+
+X <- data_all[, features]
+S <- data_all$S
+
+n <- nrow(data_all)
+K <- 5
+```
+
+```{r}
+# k fold indicator
+use_k_fold <- TRUE
+```
+
+```{r}
+# propensity score
+if (use_k_fold == FALSE){
+  prop_model <- glm(
+    A ~ .,
+    data = data.frame(A = A, X),
+    family = binomial()
+  )
+  
+  e_hat <- predict(
+    prop_model,
+    newdata = X,
+    type = "response"
+  )
+}
+```
+
+```{r}
+if (use_k_fold == TRUE){
+  n <- nrow(data_all)
+  K <- 5
+  
+  fold_id <- sample(rep(1:K, length.out = n))
+  
+  e_hat <- rep(NA, n)
+
+  features <- c("age","educ","black","hisp","marr","nodegree","re74","re75")
+  
+  for (k in 1:K) {
+  
+    train_idx <- which(fold_id != k)
+    test_idx  <- which(fold_id == k)
+  
+    train_data <- data.frame(A = A[train_idx], X[train_idx, ])
+    test_data  <- X[test_idx, ]
+  
+    # fit model on training fold
+    prop_model_k <- glm(
+      A ~ .,
+      data = train_data,
+      family = binomial()
+    )
+  
+    # predict on held-out fold
+    e_hat[test_idx] <- predict(
+      prop_model_k,
+      newdata = test_data,
+      type = "response"
+    )
+  }
+}
+```
+
+```{r}
+# outcome model
+if (use_k_fold == FALSE) {
+  mu_model <- lm(re78 ~ ., data = data.frame(re78 = Y, X))
+  mu_hat <- predict(mu_model, newdata = X)
+}
+```
+
+```{r}
+if (use_k_fold == TRUE){
+  n <- nrow(data_all)
+  K <- 5
+  
+  mu_hat <- rep(NA, n)
+  
+  # fold_id <- sample(rep(1:K, length.out = n))
+  
+  for (k in 1:K) {
+  
+    train_idx <- which(fold_id != k)
+    test_idx  <- which(fold_id == k)
+  
+    fit <- lm(re78 ~ ., data = data.frame(re78 = Y[train_idx], X[train_idx, ]))
+  
+    mu_hat[test_idx] <- predict(fit, newdata = X[test_idx, ])
+  }
+}
+```
+
+```{r}
+# used Claude to help generate code
+# r loss minimization
+# residuals
+Y_tilde <- Y - mu_hat
+A_tilde <- A - e_hat
+
+# pseudo-outcome and weights
+W <- Y_tilde / A_tilde
+weights <- A_tilde^2
+
+# weighted regression to estimate tau(X)
+tau_model <- lm(W ~ ., data    = data.frame(W = W, X), weights = weights)
+tau_hat <- predict(tau_model, newdata = X)
+
+# summary
+summary(tau_hat)
+mean(tau_hat)  # average treatment effect estimate
+```
+
+```{r}
+summary(tau_model)
+```
+
+Mean(\\hat{\\tau}) = -131.78 is the average treatment effect across individuals in our dataset. The difference in income between the treatment and control groups is \$-131.78, so the training program decreased earnings, on average.
+
+```{r}
+hist(tau_hat, xlab = "tau hat", main = "Estimated Treatment Effect Across Individuals", breaks = 50)
+```
+
+For many individuals, it seems the treatment (training program) did not have much of an effect on their income, as the tau hat value for many individuals falls around 0.
