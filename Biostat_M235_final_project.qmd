@@ -19,34 +19,30 @@ library(ggplot2)
 library(caret)
 ```
 
-You can add options to executable code like this
-
 ```{r}
 # read in the data
-observational_df <- read.csv("/nsw_observational_resampling_trimmed_new.csv")
-experimental_df <- read.csv("/nsw_experimental.csv")
+observational_df <- read.csv("/Users/emahmoodi/Library/Mobile Documents/com~apple~CloudDocs/Downloads/ucla/spring2026/BiostatM235/final_project/nsw_observational_resampling_trimmed_new.csv")
+experimental_df <- read.csv("/Users/emahmoodi/Library/Mobile Documents/com~apple~CloudDocs/Downloads/ucla/spring2026/BiostatM235/final_project/nsw_experimental.csv")
 ```
 
 The `echo: false` option disables the printing of code (only output is displayed).
 
 ```{r}
-# rowbind the data
-experimental_df$S <- 1
-observational_df$S <- 0
-
-data_all <- rbind(experimental_df, observational_df)
-```
-
-```{r}
 features <- c("age","educ","black","hisp","marr","nodegree","re74","re75")
 
-Y <- data_all$re78
-A <- data_all$treat
+Y_exp <- experimental_df$re78
+A_exp <- experimental_df$treat
 
-X <- data_all[, features]
-S <- data_all$S
+X_exp <- experimental_df[, features]
 
-n <- nrow(data_all)
+###
+Y_obs <- observational_df$re78
+A_obs <- observational_df$treat
+
+X_obs <- observational_df[, features]
+
+n_exp <- nrow(experimental_df)
+n_obs <- nrow(observational_df)
 K <- 5
 ```
 
@@ -58,14 +54,25 @@ use_k_fold <- TRUE
 ```{r}
 # propensity score
 if (use_k_fold == FALSE){
-  prop_model <- glm(
+  prop_model_exp <- glm(
     A ~ .,
-    data = data.frame(A = A, X),
+    data = data.frame(A = A_exp, X_exp),
+    family = binomial()
+  )
+  prop_model_obs <- glm(
+    A ~ .,
+    data = data.frame(A = A_obs, X_obs),
     family = binomial()
   )
   
-  e_hat <- predict(
-    prop_model,
+  e_hat_exp <- predict(
+    prop_model_exp,
+    newdata = X,
+    type = "response"
+  )
+  
+  e_hat_obs <- predict(
+    prop_model_obs,
     newdata = X,
     type = "response"
   )
@@ -74,34 +81,53 @@ if (use_k_fold == FALSE){
 
 ```{r}
 if (use_k_fold == TRUE){
-  n <- nrow(data_all)
+  n_exp <- nrow(experimental_df)
+  n_obs <- nrow(observational_df)
   K <- 5
   
-  fold_id <- sample(rep(1:K, length.out = n))
+  fold_id_exp <- sample(rep(1:K, length.out = n_exp))
+  fold_id_obs <- sample(rep(1:K, length.out = n_obs))
   
-  e_hat <- rep(NA, n)
+  e_hat_exp <- rep(NA, n_exp)
+  e_hat_obs <- rep(NA, n_obs)
 
   features <- c("age","educ","black","hisp","marr","nodegree","re74","re75")
   
   for (k in 1:K) {
   
-    train_idx <- which(fold_id != k)
-    test_idx  <- which(fold_id == k)
+    train_idx_exp <- which(fold_id_exp != k)
+    test_idx_exp  <- which(fold_id_exp == k)
+    
+    train_idx_obs <- which(fold_id_obs != k)
+    test_idx_obs  <- which(fold_id_obs == k)
   
-    train_data <- data.frame(A = A[train_idx], X[train_idx, ])
-    test_data  <- X[test_idx, ]
+    train_data_exp <- data.frame(A = A_exp[train_idx_exp], X_exp[train_idx_exp, ])
+    test_data_exp  <- X_exp[test_idx_exp, ]
+    
+    train_data_obs <- data.frame(A = A_obs[train_idx_obs], X_obs[train_idx_obs, ])
+    test_data_obs  <- X_obs[test_idx_obs, ]
   
     # fit model on training fold
-    prop_model_k <- glm(
+    prop_model_k_exp <- glm(
       A ~ .,
-      data = train_data,
+      data = train_data_exp,
+      family = binomial()
+    )
+    prop_model_k_obs <- glm(
+      A ~ .,
+      data = train_data_obs,
       family = binomial()
     )
   
     # predict on held-out fold
-    e_hat[test_idx] <- predict(
-      prop_model_k,
-      newdata = test_data,
+    e_hat_exp[test_idx_exp] <- predict(
+      prop_model_k_exp,
+      newdata = test_data_exp,
+      type = "response"
+    )
+    e_hat_obs[test_idx_obs] <- predict(
+      prop_model_k_obs,
+      newdata = test_data_obs,
       type = "response"
     )
   }
@@ -111,28 +137,40 @@ if (use_k_fold == TRUE){
 ```{r}
 # outcome model
 if (use_k_fold == FALSE) {
-  mu_model <- lm(re78 ~ ., data = data.frame(re78 = Y, X))
-  mu_hat <- predict(mu_model, newdata = X)
+  mu_model_exp <- lm(re78 ~ ., data = data.frame(re78 = Y_exp, X_exp))
+  mu_hat_exp <- predict(mu_model_exp, newdata = X_exp)
+  
+  mu_model_obs <- lm(re78 ~ ., data = data.frame(re78 = Y_obs, X_obs))
+  mu_hat_obs <- predict(mu_model_obs, newdata = X_obs)
 }
 ```
 
 ```{r}
 if (use_k_fold == TRUE){
-  n <- nrow(data_all)
+  n_exp <- nrow(experimental_df)
+  n_obs <- nrow(observational_df)
   K <- 5
   
-  mu_hat <- rep(NA, n)
+  mu_hat_exp <- rep(NA, n_exp)
+  mu_hat_obs <- rep(NA, n_obs)
   
   # fold_id <- sample(rep(1:K, length.out = n))
   
   for (k in 1:K) {
   
-    train_idx <- which(fold_id != k)
-    test_idx  <- which(fold_id == k)
+    train_idx_exp <- which(fold_id_exp != k)
+    test_idx_exp  <- which(fold_id_exp == k)
+    
+    train_idx_obs <- which(fold_id_obs != k)
+    test_idx_obs  <- which(fold_id_obs == k)
   
-    fit <- lm(re78 ~ ., data = data.frame(re78 = Y[train_idx], X[train_idx, ]))
+    fit_exp <- lm(re78 ~ ., data = data.frame(re78 = Y_exp[train_idx_exp], 
+                                              X_exp[train_idx_exp, ]))
+    fit_obs <- lm(re78 ~ ., data = data.frame(re78 = Y_obs[train_idx_obs], 
+                                              X_obs[train_idx_obs, ]))
   
-    mu_hat[test_idx] <- predict(fit, newdata = X[test_idx, ])
+    mu_hat_exp[test_idx_exp] <- predict(fit_exp, newdata = X_exp[test_idx_exp, ])
+    mu_hat_obs[test_idx_obs] <- predict(fit_obs, newdata = X_obs[test_idx_obs, ])
   }
 }
 ```
@@ -141,30 +179,53 @@ if (use_k_fold == TRUE){
 # used Claude to help generate code
 # r loss minimization
 # residuals
-Y_tilde <- Y - mu_hat
-A_tilde <- A - e_hat
+Y_tilde_exp <- Y_exp - mu_hat_exp
+A_tilde_exp <- A_exp - e_hat_exp
+
+Y_tilde_obs <- Y_obs - mu_hat_obs
+A_tilde_obs <- A_obs - e_hat_obs
+
+# if any A_tilde is close to 0, the weight W will blow up
+A_tilde_exp <- ifelse(abs(A_tilde_exp) < 1e-6, 1e-6, A_tilde_exp)
+A_tilde_obs <- ifelse(abs(A_tilde_obs) < 1e-6, 1e-6, A_tilde_obs)
 
 # pseudo-outcome and weights
-W <- Y_tilde / A_tilde
-weights <- A_tilde^2
+W_exp <- Y_tilde_exp / A_tilde_exp
+weights_exp <- A_tilde_exp^2
+
+W_obs <- Y_tilde_obs / A_tilde_obs
+weights_obs <- A_tilde_obs^2
 
 # weighted regression to estimate tau(X)
-tau_model <- lm(W ~ ., data    = data.frame(W = W, X), weights = weights)
-tau_hat <- predict(tau_model, newdata = X)
+tau_model_exp <- lm(W ~ ., data = data.frame(W = W_exp, X_exp), weights = weights_exp)
+tau_hat_exp <- predict(tau_model_exp, newdata = X_exp)
+
+tau_model_obs <- lm(W ~ ., data = data.frame(W = W_obs, X_obs), weights = weights_obs)
+tau_hat_obs <- predict(tau_model_obs, newdata = X_obs)
 
 # summary
-summary(tau_hat)
-mean(tau_hat)  # average treatment effect estimate
+summary(tau_hat_exp)
+mean(tau_hat_exp)  # average treatment effect estimate for experimental data
+
+summary(tau_hat_obs)
+mean(tau_hat_obs) # average treatment effect estimate for observational data
 ```
 
 ```{r}
-summary(tau_model)
+summary(tau_model_exp)
+summary(tau_model_obs)
+# Mean(\hat{\tau}) = -131.78 is the average treatment effect across individuals in our dataset. The difference in income between the treatment and control groups is $-131.78, so the training program decreased earnings, on average.
 ```
-
-Mean(\\hat{\\tau}) = -131.78 is the average treatment effect across individuals in our dataset. The difference in income between the treatment and control groups is \$-131.78, so the training program decreased earnings, on average.
 
 ```{r}
-hist(tau_hat, xlab = "tau hat", main = "Estimated Treatment Effect Across Individuals", breaks = 50)
+hist(tau_hat_exp, xlab = "tau hat", main = "Estimated Treatment Effect Across Individuals for Experimental Data", breaks = 50)
+hist(tau_hat_obs, xlab = "tau hat", main = "Estimated Treatment Effect Across Individuals for Observational Data", breaks = 50)
+# For many individuals, it seems the treatment (training program) did not have much of an effect on their income, as the tau hat value for many individuals falls around 0. 
 ```
 
-For many individuals, it seems the treatment (training program) did not have much of an effect on their income, as the tau hat value for many individuals falls around 0.
+```{r}
+se_exp <- sd(tau_hat_exp) / sqrt(length(tau_hat_exp))
+se_exp
+se_obs <- sd(tau_hat_obs) / sqrt(length(tau_hat_obs))
+se_obs
+```
