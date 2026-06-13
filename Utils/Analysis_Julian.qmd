@@ -264,7 +264,7 @@ weights <- eps_A^2
 
 
 ```{r}
-for (b in 1:7) {
+for (b in 1:4) {
 
   Y_tilde <- (eps_Y / eps_A) - (1 - S) * c_hat
 
@@ -293,13 +293,25 @@ for (b in 1:7) {
 
 
 ```{r}
+obs_idx <- which(S == 0)
 tau_hat <- predict(tau_forest, X)$predictions
+tau_hat_obs <- tau_hat[obs_idx]
 ```
 
+We only want to see the ATE for the observational data
+```{r}
+hist(
+  tau_hat_obs,
+  xlab = "tau hat",
+  main = "Estimated Treatment Effect Across Individuals for Observational Data",
+  breaks = 300,
+  xlim = c(-20000, 20000)
+)
+```
 
 Get ATE
 ```{r}
-ate <- mean(tau_hat)  # or all X, but no weights
+ate <- mean(tau_hat_obs)  # or all X, but no weights
 ate
 ```
 
@@ -307,4 +319,6 @@ ate
 ate_se <- sd(tau_hat) / sqrt(length(tau_hat))
 ate_se
 ```
+
+
 

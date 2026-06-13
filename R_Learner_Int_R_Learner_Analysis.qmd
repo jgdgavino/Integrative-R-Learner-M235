@@ -1,0 +1,603 @@
+---
+title: "R Learner and Integrative R Learner on NSW Data"
+format:
+  html:
+    theme: cosmo
+    embed-resources: true
+    number-sections: true
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    code-fold: false
+    df-print: kable
+---
+
+This file contains our experiments on R-Learner on both observational and experimental data as well as an Integrative R-Learner on the combined dataset. If you haven't already, please run Required.R to ensure packages run smoothly. 
+
+Please also change the file paths for the dataset here:
+
+```{r}
+experimental_path <- 'data/nsw_experimental.csv'
+observational_path <- 'data/nsw_observational_resampling_trimmed_new.csv'
+```
+
+
+
+```{r}
+set.seed(123)
+library(knitr)
+library(grf)
+library(ggplot2)
+library(caret)
+```
+
+k-fold indicator
+```{r}
+use_k_fold <- TRUE
+```
+
+
+# Load Data
+```{r}
+nsw_experimental <- read.csv(experimental_path)
+```
+
+```{r}
+nsw_observational <- read.csv(observational_path)
+```
+
+```{r}
+str(nsw_observational)
+```
+
+
+```{r}
+str(nsw_experimental)
+```
+
+
+# R-Learner Implementation
+
+
+## Transform Data
+
+```{r}
+features <- c("age","educ","black","hisp","marr","nodegree","re74","re75")
+
+Y_exp <- nsw_experimental$re78
+A_exp <- nsw_experimental$treat
+
+X_exp <- nsw_experimental[, features]
+
+###
+Y_obs <- nsw_observational$re78
+A_obs <- nsw_observational$treat
+
+X_obs <- nsw_observational[, features]
+
+n_exp <- nrow(nsw_experimental)
+n_obs <- nrow(nsw_observational)
+K <- 5
+```
+
+```{r}
+# k fold indicator
+use_k_fold <- TRUE
+```
+
+
+## Calculate Propensity Scores
+
+
+```{r}
+# propensity score
+if (use_k_fold == FALSE){
+  prop_model_exp <- glm(
+    A ~ .,
+    data = data.frame(A = A_exp, X_exp),
+    family = binomial()
+  )
+  prop_model_obs <- glm(
+    A ~ .,
+    data = data.frame(A = A_obs, X_obs),
+    family = binomial()
+  )
+  
+  e_hat_exp <- predict(
+    prop_model_exp,
+    newdata = X,
+    type = "response"
+  )
+  
+  e_hat_obs <- predict(
+    prop_model_obs,
+    newdata = X,
+    type = "response"
+  )
+}
+```
+
+```{r}
+if (use_k_fold == TRUE){
+  n_exp <- nrow(nsw_experimental)
+  n_obs <- nrow(nsw_observational)
+  K <- 5
+  
+  fold_id_exp <- sample(rep(1:K, length.out = n_exp))
+  fold_id_obs <- sample(rep(1:K, length.out = n_obs))
+  
+  e_hat_exp <- rep(NA, n_exp)
+  e_hat_obs <- rep(NA, n_obs)
+
+  features <- c("age","educ","black","hisp","marr","nodegree","re74","re75")
+  
+  for (k in 1:K) {
+  
+    train_idx_exp <- which(fold_id_exp != k)
+    test_idx_exp  <- which(fold_id_exp == k)
+    
+    train_idx_obs <- which(fold_id_obs != k)
+    test_idx_obs  <- which(fold_id_obs == k)
+  
+    train_data_exp <- data.frame(A = A_exp[train_idx_exp], X_exp[train_idx_exp, ])
+    test_data_exp  <- X_exp[test_idx_exp, ]
+    
+    train_data_obs <- data.frame(A = A_obs[train_idx_obs], X_obs[train_idx_obs, ])
+    test_data_obs  <- X_obs[test_idx_obs, ]
+  
+    # fit model on training fold
+    prop_model_k_exp <- glm(
+      A ~ .,
+      data = train_data_exp,
+      family = binomial()
+    )
+    prop_model_k_obs <- glm(
+      A ~ .,
+      data = train_data_obs,
+      family = binomial()
+    )
+  
+    # predict on held-out fold
+    e_hat_exp[test_idx_exp] <- predict(
+      prop_model_k_exp,
+      newdata = test_data_exp,
+      type = "response"
+    )
+    e_hat_obs[test_idx_obs] <- predict(
+      prop_model_k_obs,
+      newdata = test_data_obs,
+      type = "response"
+    )
+  }
+}
+```
+
+
+## Calculate Outcome Models
+
+
+```{r}
+# outcome model
+if (use_k_fold == FALSE) {
+  mu_model_exp <- lm(re78 ~ ., data = data.frame(re78 = Y_exp, X_exp))
+  mu_hat_exp <- predict(mu_model_exp, newdata = X_exp)
+  
+  mu_model_obs <- lm(re78 ~ ., data = data.frame(re78 = Y_obs, X_obs))
+  mu_hat_obs <- predict(mu_model_obs, newdata = X_obs)
+}
+```
+
+
+```{r}
+if (use_k_fold == TRUE){
+  n_exp <- nrow(nsw_experimental)
+  n_obs <- nrow(nsw_observational)
+  K <- 5
+  
+  mu_hat_exp <- rep(NA, n_exp)
+  mu_hat_obs <- rep(NA, n_obs)
+  
+  # fold_id <- sample(rep(1:K, length.out = n))
+  
+  for (k in 1:K) {
+  
+    train_idx_exp <- which(fold_id_exp != k)
+    test_idx_exp  <- which(fold_id_exp == k)
+    
+    train_idx_obs <- which(fold_id_obs != k)
+    test_idx_obs  <- which(fold_id_obs == k)
+  
+    fit_exp <- lm(re78 ~ ., data = data.frame(re78 = Y_exp[train_idx_exp], 
+                                              X_exp[train_idx_exp, ]))
+    fit_obs <- lm(re78 ~ ., data = data.frame(re78 = Y_obs[train_idx_obs], 
+                                              X_obs[train_idx_obs, ]))
+  
+    mu_hat_exp[test_idx_exp] <- predict(fit_exp, newdata = X_exp[test_idx_exp, ])
+    mu_hat_obs[test_idx_obs] <- predict(fit_obs, newdata = X_obs[test_idx_obs, ])
+  }
+}
+```
+
+
+## Estimate Tau's using Weighted regressions
+
+```{r}
+# used Claude to help generate code
+# r loss minimization
+# residuals
+Y_tilde_exp <- Y_exp - mu_hat_exp
+A_tilde_exp <- A_exp - e_hat_exp
+
+Y_tilde_obs <- Y_obs - mu_hat_obs
+A_tilde_obs <- A_obs - e_hat_obs
+
+# if any A_tilde is close to 0, the weight W will blow up
+A_tilde_exp <- ifelse(abs(A_tilde_exp) < 1e-6, 1e-6, A_tilde_exp)
+A_tilde_obs <- ifelse(abs(A_tilde_obs) < 1e-6, 1e-6, A_tilde_obs)
+
+# pseudo-outcome and weights
+W_exp <- Y_tilde_exp / A_tilde_exp
+weights_exp <- A_tilde_exp^2
+
+W_obs <- Y_tilde_obs / A_tilde_obs
+weights_obs <- A_tilde_obs^2
+
+# weighted regression to estimate tau(X)
+tau_model_exp <- lm(W ~ ., data = data.frame(W = W_exp, X_exp), weights = weights_exp)
+tau_hat_exp <- predict(tau_model_exp, newdata = X_exp)
+
+tau_model_obs <- lm(W ~ ., data = data.frame(W = W_obs, X_obs), weights = weights_obs)
+tau_hat_obs <- predict(tau_model_obs, newdata = X_obs)
+
+# summary
+summary(tau_hat_exp)
+mean(tau_hat_exp)  # average treatment effect estimate for experimental data
+
+summary(tau_hat_obs)
+mean(tau_hat_obs) # average treatment effect estimate for observational data
+```
+Results
+
+```{r}
+summary(tau_model_exp)
+summary(tau_model_obs)
+# Mean(\hat{\tau}) = -131.78 is the average treatment effect across individuals in our dataset. The difference in income between the treatment and control groups is $-131.78, so the training program decreased earnings, on average.
+```
+
+```{r}
+hist(tau_hat_exp, xlab = "tau hat", main = "Estimated Treatment Effect Across Individuals for Experimental Data", breaks = 50)
+hist(tau_hat_obs, xlab = "tau hat", main = "Estimated Treatment Effect Across Individuals for Observational Data", breaks = 50)
+# For many individuals, it seems the treatment (training program) did not have much of an effect on their income, as the tau hat value for many individuals falls around 0. 
+```
+
+```{r}
+se_exp <- sd(tau_hat_exp) / sqrt(length(tau_hat_exp))
+se_exp
+se_obs <- sd(tau_hat_obs) / sqrt(length(tau_hat_obs))
+se_obs
+```
+
+
+# Integrative R-Learner
+
+## Reload data to reset
+
+
+```{r}
+set.seed(123)
+```
+
+```{r}
+nsw_experimental <- read.csv(experimental_path)
+```
+
+```{r}
+nsw_observational <- read.csv(observational_path)
+```
+
+## Combine Data
+
+Row bind the data and create an indicator variable (1 = experimental, 0 = observational)
+```{r}
+nsw_experimental$S <- 1
+nsw_observational$S <- 0
+
+data_all <- rbind(nsw_experimental, nsw_observational)
+```
+
+
+## Define Outcome, Covariates, Assignment, and Origin
+
+```{r}
+Y <- data_all$re78
+A <- data_all$treat
+
+X <- data_all[, c("age","educ","black","hisp","marr","nodegree","re74","re75")]
+S <- data_all$S
+```
+
+
+## Calculate Propensity Score
+
+
+```{r}
+if (use_k_fold == FALSE){
+  prop_model <- glm(
+    S ~ .,
+    data = data_all[, c("S", "age","educ","black","hisp","marr","nodegree","re74","re75")],
+    family = binomial()
+  )
+  
+  e_hat <- predict(
+    prop_model,
+    newdata = data_all[, c("age","educ","black","hisp","marr","nodegree","re74","re75")],
+    type = "response"
+  )
+}
+```
+
+
+```{r}
+if (use_k_fold == TRUE){
+  n <- nrow(data_all)
+  K <- 5
+  
+  fold_id <- sample(rep(1:K, length.out = n))
+  
+  e_hat <- rep(NA, n)
+
+  features <- c("age","educ","black","hisp","marr","nodegree","re74","re75")
+  
+  for (k in 1:K) {
+  
+    train_idx <- which(fold_id != k)
+    test_idx  <- which(fold_id == k)
+  
+    train_data <- data_all[train_idx, c("S", features)]
+    test_data  <- data_all[test_idx, features]
+  
+    # fit model on training fold
+    prop_model_k <- glm(
+      S ~ .,
+      data = train_data,
+      family = binomial()
+    )
+  
+    # predict on held-out fold
+    e_hat[test_idx] <- predict(
+      prop_model_k,
+      newdata = test_data,
+      type = "response"
+    )
+  }
+}
+```
+
+
+### Check Overlap
+
+```{r}
+df <- data.frame(
+  ps = e_hat,
+  treat = data_all$treat
+)
+
+ggplot(df, aes(x = ps, fill = factor(treat))) +
+  geom_density(alpha = 0.4) +
+  labs(fill = "Treatment", x = "Propensity score", y = "Density")
+```
+
+Wow, look at that overlap. Even with the truth mixed in, we still have this mass on the left for control units
+
+
+
+
+## Calculate Outcome Model
+
+
+```{r}
+
+
+if (use_k_fold == FALSE) {
+  # RCT outcome model
+  mu_rct_model <- lm(re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
+                     data = nsw_experimental)
+  
+  # Observational outcome model
+  mu_obs_model <- lm(re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
+                     data = nsw_observational)
+  
+  X_rct <- X[S == 1, ]
+  X_obs <- X[S == 0, ]
+  
+  mu_hat <- numeric(nrow(X))
+  
+  mu_hat[S == 1] <- predict(mu_rct_model, newdata = X_rct)
+  mu_hat[S == 0] <- predict(mu_obs_model, newdata = X_obs)
+}
+
+```
+
+```{r}
+if (use_k_fold == TRUE){
+  K <- 5
+  
+  mu_hat <- numeric(nrow(X))
+  
+  # -------------------------
+  # RCT folds
+  # -------------------------
+  rct_idx <- which(S == 1)
+  
+  folds_rct <- createFolds(rct_idx, k = K, list = TRUE)
+  
+  for (k in 1:K) {
+  
+    test_idx <- rct_idx[folds_rct[[k]]]
+    train_idx <- setdiff(rct_idx, test_idx)
+  
+    fit <- lm(
+      re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
+      data = data.frame(
+        re78 = Y[train_idx],
+        X[train_idx, ]
+      )
+    )
+  
+    mu_hat[test_idx] <- predict(
+      fit,
+      newdata = X[test_idx, ]
+    )
+  }
+  
+  # -------------------------
+  # Observational folds
+  # -------------------------
+  obs_idx <- which(S == 0)
+  
+  folds_obs <- createFolds(obs_idx, k = K, list = TRUE)
+  
+  for (k in 1:K) {
+  
+    test_idx <- obs_idx[folds_obs[[k]]]
+    train_idx <- setdiff(obs_idx, test_idx)
+  
+    fit <- lm(
+      re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
+      data = data.frame(
+        re78 = Y[train_idx],
+        X[train_idx, ]
+      )
+    )
+  
+    mu_hat[test_idx] <- predict(
+      fit,
+      newdata = X[test_idx, ]
+    )
+  }
+}
+```
+
+
+
+
+## Initial Confounding Function
+
+This could be any value, but to have a smart initialization, we use the difference in outcomes between observed and RCT
+
+```{r}
+
+# RCT outcome model
+mu_rct_model <- lm(re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
+                   data = nsw_experimental)
+
+# Observational outcome model
+mu_obs_model <- lm(re78 ~ age + educ + black + hisp + marr + nodegree + re74 + re75,
+                   data = nsw_observational)
+
+mu_rct_pred <- predict(mu_rct_model, newdata = X)
+mu_obs_pred <- predict(mu_obs_model, newdata = X)
+
+c_hat <- mu_obs_pred - mu_rct_pred
+```
+
+
+## Fit Tau using Weighted Forests
+
+This is taken directly from the appendix algorithm 2
+
+```{r}
+eps_Y <- Y - mu_hat
+eps_A <- A - e_hat
+weights <- eps_A^2
+```
+
+Weighted Forest Regression, weights give us a signal of how much an observation can give us a heterogenous effect
+```{r}
+for (b in 1:4) {
+
+  Y_tilde <- (eps_Y / eps_A) - (1 - S) * c_hat
+
+  tau_forest <- regression_forest(
+    X,
+    Y_tilde,
+    sample.weights = weights
+  )
+
+  tau_hat <- predict(tau_forest, X)$predictions
+
+
+  Y_tilde <- (eps_Y / eps_A) - tau_hat
+
+  obs_idx <- which(S == 0)
+
+  c_forest <- regression_forest(
+    X[obs_idx,],
+    Y_tilde[obs_idx],
+    sample.weights = weights[obs_idx]
+  )
+
+  c_hat <- predict(c_forest, X)$predictions
+}
+```
+
+
+```{r}
+obs_idx <- which(S == 0)
+tau_hat <- predict(tau_forest, X)$predictions
+tau_hat_obs <- tau_hat[obs_idx]
+```
+
+We only want to see the ATE for the observational data
+```{r}
+hist(
+  tau_hat_obs,
+  xlab = "tau hat",
+  main = "Estimated Treatment Effect Across Individuals for Observational Data",
+  breaks = 300,
+  xlim = c(-20000, 20000)
+)
+```
+
+Get ATE
+```{r}
+ate <- mean(tau_hat_obs)  # or all X, but no weights
+ate
+```
+
+```{r}
+ate_se <- sd(tau_hat) / sqrt(length(tau_hat))
+ate_se
+```
+
+
+# Final Results
+
+```{r}
+# Values you already have
+ate_int  <- 862.2943
+se_int   <- 146.1605
+
+ate_rct  <- 1695.154
+se_rct   <- 67.43434
+
+ate_obs  <- -2243.241
+se_obs   <- 118.0976
+
+# Create table
+results <- data.frame(
+  Method = c("Integrative R-Learner", "R-Learner (RCT)", "R-Learner (Obs)"),
+  ATE = c(ate_int, ate_rct, ate_obs),
+  SE = c(se_int, se_rct, se_obs)
+)
+
+# 95% CI (Wald)
+z <- 1.96
+results$CI_lower <- results$ATE - z * results$SE
+results$CI_upper <- results$ATE + z * results$SE
+
+kable(results, digits = 3, caption = "ATE Estimates with 95% Confidence Intervals")
+```
+
+The integrative R-Learner ATE was estimated only using observational data, we get a very confident positive ATE using Integrative R-Learner. The R-Learner using only observational data yields a negative ATE which does not reflect the RCT ATE. This suggests that the Integrative R-Learner outperforms R-Learner, but we would need access to an experimental and observational dataset.
+
