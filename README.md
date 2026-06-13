@@ -6,4 +6,17 @@ National Supported Work Demonstration (NSW) dataset: Lalonde 1986
 
 The data to run the code is included in Integrative-R-Learner-M235/data. The updated observational data is titled "new_observational_resampling_trimmed_new.csv", and the experimental data is titled "new_experimental.csv" 
 
-The code to run the basic R-learner is titled "Biostat_M235_final_project.qmd", and the code to run the integrative R-learner is titled "Analysis_Julian.qmd"
+Our experiments can be found in the R_Learner_Int_R_Learner_Analysis.html
+
+If you would like to run the code yourself please run Required.R
+
+Then, all of the code can be found in R_Learner_Int_R_Learner_Analysis.qmd
+
+
+
+
+
+
+The Languages section says 99.8% HTML and 0.2% R
+
+I disagree with this and It was actually 99.8% Claude and 0.2% R 😏
